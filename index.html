@@ -7,40 +7,47 @@
 
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"/>
+  <!-- Leaflet Draw CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"/>
+  <!-- MiniMap CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.min.css"/>
 
   <style>
     body { margin:0; padding:0; font-family:Arial,sans-serif; background:#f0f0f0 }
     #map { height:100vh; width:100% }
-    .info-panel {
-      position:absolute; top:10px; right:10px; z-index:1000;
+    .info-panel { position:absolute; top:10px; right:10px; z-index:1000;
       background:rgba(255,255,255,0.95); padding:15px; border-radius:8px;
       box-shadow:0 2px 15px rgba(0,0,0,0.3); max-width:300px; font-size:14px;
     }
     .info-panel h3 { margin-top:0; color:#2c5530 }
-    .loading {
-      position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    .loading { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
       z-index:1001; background:white; padding:20px; border-radius:8px;
       box-shadow:0 2px 15px rgba(0,0,0,0.3); text-align:center;
     }
     .loading.hidden { display:none }
-    .spinner {
-      border:4px solid #f3f3f3; border-top:4px solid #3498db;
+    .spinner { border:4px solid #f3f3f3; border-top:4px solid #3498db;
       border-radius:50%; width:30px; height:30px;
       animation:spin 1s linear infinite; margin:0 auto 10px;
     }
     @keyframes spin { to { transform:rotate(360deg) } }
-    .controls { margin-top:15px }
+    .controls { margin-top:10px }
     .control-group { margin-bottom:10px }
     label { display:block; margin-bottom:5px; font-weight:bold }
     input[type=range] { width:100% }
     .opacity-value { text-align:center; font-size:12px; color:#666 }
-    .error {
-      background:#ffebee; color:#c62828; padding:10px;
-      border-radius:4px; margin-top:10px; display:none;
+    .legend { background: white; line-height:18px; color:#555; padding:6px 8px; }
+    .legend i { width:18px; height:18px; float:left; margin-right:8px; opacity:0.7; }
+    .error { background:#ffebee; color:#c62828; padding:10px; border-radius:4px;
+      margin-top:10px; display:none;
     }
+    /* Modal Histogram */
+    .modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%;
+      background:rgba(0,0,0,0.5); justify-content:center; align-items:center;
+    }
+    .modal-content { background:#fff; padding:20px; border-radius:8px; max-width:90%; }
+    .modal-close { float:right; cursor:pointer; font-size:18px; }
   </style>
 </head>
-
 <body>
   <div id="loading" class="loading">
     <div class="spinner"></div>
@@ -50,10 +57,6 @@
   <div class="info-panel">
     <h3>Visor NBR Post-incendio</h3>
     <p><strong>Archivo:</strong> NBR_post_incendio.tif</p>
-    <p><strong>Fuente:</strong> Repositorio local</p>
-    <p><strong>Descripción:</strong> Índice NBR post-incendio en Ecuador</p>
-    <p><strong>Nota:</strong> El archivo debe estar en la misma carpeta que este HTML</p>
-
     <div class="controls">
       <div class="control-group">
         <label for="opacitySlider">Opacidad:</label>
@@ -61,171 +64,139 @@
         <div class="opacity-value">80%</div>
       </div>
     </div>
-
-    <div id="rasterInfo" style="display:none;">
-      <h4>Información del Raster:</h4>
-      <div id="rasterDetails"></div>
-    </div>
-
+    <button id="showHistogram">Histograma</button>
+    <div id="pixelInfo" style="margin-top:10px;font-size:12px;"></div>
     <div id="errorDiv" class="error"></div>
   </div>
 
   <div id="map"></div>
 
+  <!-- Histogram Modal -->
+  <div id="histModal" class="modal">
+    <div class="modal-content">
+      <span id="modalClose" class="modal-close">&times;</span>
+      <h4>Histograma de NBR</h4>
+      <canvas id="histChart" width="400" height="200"></canvas>
+    </div>
+  </div>
+
   <!-- Leaflet JS -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <!-- Leaflet Draw -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+  <!-- MiniMap -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-minimap/3.6.1/Control.MiniMap.min.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-  <!-- Carga dinámica de GeoRaster y su capa -->
   <script>
+    // Carga dinámica de librerías GeoRaster
     async function loadLibraries() {
-      // GeoRaster
-      await new Promise((res, rej) => {
-        const s = document.createElement('script');
-        s.src = 'https://unpkg.com/georaster@1.5.6/dist/georaster.browser.bundle.js';
-        s.onload = res; s.onerror = () => rej('Error cargando georaster');
-        document.head.appendChild(s);
-      });
-      // GeoRaster-layer-for-Leaflet
-      await new Promise((res, rej) => {
-        const s = document.createElement('script');
-        s.src = 'https://unpkg.com/georaster-layer-for-leaflet@3.10.0/dist/georaster-layer-for-leaflet.min.js';
-        s.onload = res; s.onerror = () => rej('Error cargando georaster-layer-for-leaflet');
-        document.head.appendChild(s);
-      });
-      if (typeof parseGeoraster === 'undefined') throw new Error('parseGeoraster no disponible');
-      if (typeof GeoRasterLayer === 'undefined') throw new Error('GeoRasterLayer no disponible');
-    }
-  </script>
-
-  <!-- Lógica principal -->
-  <script>
-    // Inicializar mapa y capas base
-    const map = L.map('map').setView([0,0],2);
-    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-      attribution:'© OpenStreetMap contributors'
-    }).addTo(map);
-    const sat = L.tileLayer(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      { attribution:'© Esri, Maxar, Earthstar Geographics' }
-    );
-    L.control.layers({ 'OSM':osm, 'Satélite':sat }).addTo(map);
-    L.control.scale({ position:'bottomleft', metric:true, imperial:false }).addTo(map);
-
-    // URLs posibles para el GeoTIFF
-    const possibleUrls = [
-      './NBR_post_incendio.tif',
-      '/VisorRaster/NBR_post_incendio.tif',
-      'NBR_post_incendio.tif',
-      'https://github.com/lsantiago/VisorRaster/raw/refs/heads/main/NBR_post_incendio.tif'
-    ];
-
-    const loadingDiv   = document.getElementById('loading');
-    const errorDiv     = document.getElementById('errorDiv');
-    const opacitySlider= document.getElementById('opacitySlider');
-    const opacityValue = document.querySelector('.opacity-value');
-    const rasterInfo   = document.getElementById('rasterInfo');
-    const rasterDetails= document.getElementById('rasterDetails');
-    let rasterLayer;
-
-    function showError(msg) {
-      errorDiv.textContent = msg;
-      errorDiv.style.display = 'block';
-      loadingDiv.classList.add('hidden');
+      await new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://unpkg.com/georaster@1.5.6/dist/georaster.browser.bundle.js'; s.onload=res; s.onerror=()=>rej('Error georaster'); document.head.appendChild(s); });
+      await new Promise((res,rej)=>{ const s=document.createElement('script'); s.src='https://unpkg.com/georaster-layer-for-leaflet@3.10.0/dist/georaster-layer-for-leaflet.min.js'; s.onload=res; s.onerror=()=>rej('Error layer'); document.head.appendChild(s); });
+      if(typeof parseGeoraster==='undefined'||typeof GeoRasterLayer==='undefined') throw 'GeoRaster libs faltan';
     }
 
-    function showRasterInfo(r) {
-      const cenX = (r.xmin + r.xmax)/2;
-      const cenY = (r.ymin + r.ymax)/2;
-      const utm = r.xmin>180 || r.xmax>180 || r.ymin>90 || r.ymax>90;
-      rasterDetails.innerHTML = `
-        <p><strong>Ancho:</strong> ${r.width} px</p>
-        <p><strong>Alto:</strong> ${r.height} px</p>
-        <p><strong>Bandas:</strong> ${r.numBands}</p>
-        <p><strong>SRC:</strong> EPSG:4326 ${utm? '⚠️':'✓'}</p>
-        <p><strong>Extensión:</strong>
-          N:${r.ymax.toFixed(6)}°, S:${r.ymin.toFixed(6)}°,
-          E:${r.xmax.toFixed(6)}°, O:${r.xmin.toFixed(6)}°
-        </p>
-      `;
-      rasterInfo.style.display = 'block';
-    }
+    // Inicialización del mapa
+    const map=L.map('map').setView([-1, -78.5],6);
+    const osm=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'© OSM'}).addTo(map);
+    const sat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{ attribution:'© Esri'});
+    L.control.layers({OSM:osm,Satélite:sat}).addTo(map);
+    L.control.scale({position:'bottomleft',metric:true,imperial:false}).addTo(map);
 
-    opacitySlider.addEventListener('input', ()=>{
-      const v = opacitySlider.value/100;
-      opacityValue.textContent = opacitySlider.value + '%';
-      if (rasterLayer) rasterLayer.setOpacity(v);
-    });
+    // Minimapa
+    const mini=new L.Control.MiniMap(osm,{ toggleDisplay:true, minimized:false }).addTo(map);
 
-    async function findWorkingUrl() {
-      for (let url of possibleUrls) {
-        try {
-          const r = await fetch(url,{method:'HEAD'});
-          if (r.ok) return url;
-        } catch{}
+    // Variables DOM
+    const loading=document.getElementById('loading'), errorDiv=document.getElementById('errorDiv');
+    const opacitySlider=document.getElementById('opacitySlider'), opacityValue=document.querySelector('.opacity-value');
+    const pixelInfo=document.getElementById('pixelInfo');
+    const histModal=document.getElementById('histModal'), modalClose=document.getElementById('modalClose'), showHistBtn=document.getElementById('showHistogram');
+
+    let rasterLayer, georasterObj;
+
+    // Leyenda control
+    const legend=L.control({position:'bottomright'});
+    legend.onAdd=function(){
+      const div=L.DomUtil.create('div','legend');
+      const grades=[-1,-0.5,-0.25,-0.1,0.1,0.3];
+      const colors=['rgb(139,0,0)','rgb(255,0,0)','rgb(255,165,0)','rgb(255,255,0)','rgb(144,238,144)','rgb(0,128,0)'];
+      div.innerHTML='<strong>NBR</strong><br>';
+      for(let i=0;i<grades.length;i++){
+        div.innerHTML+=`<i style="background:${colors[i]}"></i> ${grades[i]}${grades[i+1]? '&ndash;'+grades[i+1] : '+'}<br>`;
       }
-      throw new Error('No se encontró el GeoTIFF en ninguna ruta');
-    }
+      return div;
+    };
+    legend.addTo(map);
 
-    async function loadRaster() {
-      try {
-        const url = await findWorkingUrl();
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const buf = await resp.arrayBuffer();
-        if (!buf.byteLength) throw new Error('Archivo vacío');
+    // Función principal
+    async function loadRaster(){
+      try{
+        const urls=['./NBR_post_incendio.tif','/VisorRaster/NBR_post_incendio.tif','NBR_post_incendio.tif'];
+        let urlOk; for(const u of urls){ try{ const r=await fetch(u,{method:'HEAD'}); if(r.ok){urlOk=u;break;} }catch{} }
+        if(!urlOk)throw 'GeoTIFF no hallado';
+        const r=await fetch(urlOk); if(!r.ok)throw 'HTTP '+r.status;
+        const buf=await r.arrayBuffer(); georasterObj=await parseGeoraster(buf);
+        rasterLayer=new GeoRasterLayer({georaster:georasterObj,opacity:opacitySlider.value/100,pixelValuesToColorFn(vals){
+          if(!vals||!vals.length)return null;const v=vals[0]; if(isNaN(v))return null;
+          if(v<-0.5)return'rgba(139,0,0,0.8)'; if(v<-0.25)return'rgba(255,0,0,0.8)'; if(v<-0.1)return'rgba(255,165,0,0.8)';
+          if(v<0.1)return'rgba(255,255,0,0.8)'; if(v<0.3)return'rgba(144,238,144,0.8)'; return'rgba(0,128,0,0.8)';
+        },resolution:256}).addTo(map);
 
-        const gr = await parseGeoraster(buf);
-        showRasterInfo(gr);
+        // Hover info
+        map.on('mousemove',async e=>{
+          if(!rasterLayer) return;
+          const vals=await rasterLayer.getValuesAtLatLng(e.latlng);
+          if(vals && vals.length){ pixelInfo.textContent=`NBR: ${vals[0].toFixed(3)} at ${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`; }
+        });
 
-        // Crear capa con colorización NBR
-        rasterLayer = new GeoRasterLayer({
-          georaster: gr,
-          opacity: 0.8,
-          pixelValuesToColorFn(vals) {
-            if (!vals || vals.length===0) return null;
-            const v = vals[0];
-            if (isNaN(v)) return null;
-            if (v < -0.5) return 'rgb(139,0,0)';
-            if (v < -0.25) return 'rgb(255,0,0)';
-            if (v < -0.1) return 'rgb(255,165,0)';
-            if (v < 0.1) return 'rgb(255,255,0)';
-            if (v < 0.3) return 'rgb(144,238,144)';
-            return 'rgb(0,128,0)';
-          },
-          resolution:256
-        }).addTo(map);
-
-        // Ajustar vista según UTM o límites reales
-        const bounds = [
-          [gr.ymin, gr.xmin],
-          [gr.ymax, gr.xmax]
-        ];
-        const coordsLookLikeUTM = gr.xmin>180 || gr.xmax>180 || gr.ymin>90 || gr.ymax>90;
-        if (coordsLookLikeUTM) {
-          // Aproximación UTM→WGS84 rápida
-          const utmX=(gr.xmin+gr.xmax)/2, utmY=(gr.ymin+gr.ymax)/2;
-          const lon0=-81, fe=500000, fn=10000000;
-          const lng = lon0 + ((utmX-fe)/111320);
-          const lat = -((fn-utmY)/110540);
+        // Ajuste vista
+        const bnds=[[georasterObj.ymin,georasterObj.xmin],[georasterObj.ymax,georasterObj.xmax]];
+        const utmCond=georasterObj.xmin>180||georasterObj.xmax>180||georasterObj.ymin>90||georasterObj.ymax>90;
+        if(utmCond){ const utmX=(georasterObj.xmin+georasterObj.xmax)/2, utmY=(georasterObj.ymin+georasterObj.ymax)/2;
+          const cm=-81, fe=500000, fn=10000000;
+          const lng=cm+((utmX-fe)/111320), lat= -((fn-utmY)/110540);
           map.setView([lat,lng],12);
-        } else {
-          map.fitBounds(bounds,{padding:[50,50],maxZoom:18});
-        }
+        } else { map.fitBounds(bnds,{padding:[30,30],maxZoom:16}); }
 
-        loadingDiv.classList.add('hidden');
-      } catch(e) {
-        showError(`Error al cargar el raster: ${e.message}`);
-      }
+        loading.classList.add('hidden');
+      }catch(e){ errorDiv.textContent=e; errorDiv.style.display='block'; loading.classList.add('hidden'); }
     }
 
-    window.addEventListener('load', async ()=>{
-      try {
-        await loadLibraries();
-        loadRaster();
-      } catch(e) {
-        showError(`Error cargando librerías: ${e}`);
-      }
+    // Opacidad slider
+    opacitySlider.addEventListener('input',()=>{
+      const v=opacitySlider.value/100; opacityValue.textContent=opacitySlider.value+'%'; if(rasterLayer) rasterLayer.setOpacity(v);
     });
+
+    // Histogram modal
+    showHistBtn.addEventListener('click',()=>{ histModal.style.display='flex'; generateHistogram(); });
+    modalClose.addEventListener('click',()=> histModal.style.display='none');
+
+    // Generar histograma simple (binned)
+    function generateHistogram(){
+      if(!georasterObj) return;
+      const vals=georasterObj.values[0].filter(v=>!isNaN(v)); // asume band0
+      const bins=20; const min=Math.min(...vals), max=Math.max(...vals);
+      const step=(max-min)/bins; const counts=new Array(bins).fill(0);
+      vals.forEach(v=>{ const idx=Math.min(Math.floor((v-min)/step),bins-1); counts[idx]++; });
+      const labels=counts.map((_,i)=>(min + i*step).toFixed(2));
+      const ctx=document.getElementById('histChart').getContext('2d');
+      new Chart(ctx,{ type:'bar', data:{ labels, datasets:[{ label:'Frecuencia', data:counts }] }, options:{ responsive:true } });
+    }
+
+    // Dibujo y medición
+    const drawControl=new L.Control.Draw({ draw:{ polyline:true, polygon:true, rectangle:true, circle:false, marker:false }, edit:{ featureGroup:new L.FeatureGroup().addTo(map) } });
+    map.addControl(drawControl);
+    map.on(L.Draw.Event.CREATED, e=>{ const layer=e.layer; map.addLayer(layer); alert('Nuevo dibujo agregado. Usa herramientas externas para estadísticas.'); });
+
+    // Atajos: + zoom in, - zoom out, r reset
+    document.addEventListener('keydown', e=>{
+      if(e.key === '+') map.zoomIn();
+      if(e.key === '-') map.zoomOut();
+      if(e.key.toLowerCase()==='r') map.setView([-1,-78.5],6);
+    });
+
+    window.addEventListener('load', async ()=>{ await loadLibraries(); loadRaster(); });
   </script>
 </body>
 </html>
