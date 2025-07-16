@@ -360,13 +360,41 @@
                 
                 if (coordsLookLikeUTM) {
                     console.warn('⚠️ Las coordenadas parecen estar en UTM pero el archivo dice ser EPSG:4326');
-                    console.warn('Esto puede causar problemas de visualización');
+                    console.warn('Aplicando transformación aproximada para Ecuador (UTM 17S)');
+                    
+                    // Transformación aproximada de UTM 17S a WGS84 para Ecuador
+                    // Esta es una aproximación simple - para uso exacto usar proj4js
+                    const utmZone = 17;
+                    const hemisphere = 'S'; // Sur para Ecuador
+                    
+                    // Coordenadas del centro aproximado en UTM
+                    const utmCenterX = (georaster.xmax + georaster.xmin) / 2;
+                    const utmCenterY = (georaster.ymax + georaster.ymin) / 2;
+                    
+                    // Aproximación simple para Ecuador (zona UTM 17S)
+                    // Estas fórmulas son aproximadas para visualización
+                    const centralMeridian = -81; // Meridiano central UTM zona 17
+                    const falseEasting = 500000;
+                    const falseNorthing = 10000000; // Hemisferio sur
+                    
+                    // Convertir aproximadamente a grados
+                    const approxLng = centralMeridian + ((utmCenterX - falseEasting) / 111320);
+                    const approxLat = -((falseNorthing - utmCenterY) / 110540); // Negativo para hemisferio sur
+                    
+                    console.log('Centro UTM:', {x: utmCenterX, y: utmCenterY});
+                    console.log('Centro aproximado en WGS84:', {lat: approxLat, lng: approxLng});
+                    
+                    // Ajustar vista manualmente a Ecuador
+                    map.setView([approxLat, approxLng], 12);
+                    console.log('Vista ajustada manualmente a Ecuador');
+                } else {
+                } else {
+                    console.log('- Centro aproximado:', {
+                        lat: (georaster.ymax + georaster.ymin) / 2,
+                        lng: (georaster.xmax + georaster.xmin) / 2
+                    });
                 }
                 
-                console.log('- Centro aproximado:', {
-                    lat: (georaster.ymax + georaster.ymin) / 2,
-                    lng: (georaster.xmax + georaster.xmin) / 2
-                });
                 console.log('- Proyección:', georaster.projection);
                 console.log('- SRS:', georaster.spatialReferenceSystem);
                 
@@ -460,21 +488,33 @@
                 console.log('Bounds calculados:', bounds);
                 console.log('¿Bounds válidos?', bounds[0][0] !== bounds[1][0] && bounds[0][1] !== bounds[1][1]);
                 
-                // Verificar que los bounds son válidos antes de ajustar la vista
-                if (bounds[0][0] !== bounds[1][0] && bounds[0][1] !== bounds[1][1]) {
-                    map.fitBounds(bounds, { 
-                        padding: [50, 50],
-                        maxZoom: 18 // Permitir más zoom para ver detalles
-                    });
-                    console.log('Vista ajustada a los límites del raster');
+                // Verificar si las coordenadas parecen UTM
+                const coordsLookLikeUTM = georaster.xmin > 180 || georaster.xmax > 180 || 
+                                         georaster.ymin > 90 || georaster.ymax > 90;
+                
+                if (coordsLookLikeUTM) {
+                    console.log('Detectadas coordenadas UTM, ajustando vista a Ecuador...');
+                    // Centrar en Ecuador donde debería estar la imagen
+                    // Basado en las coordenadas UTM proporcionadas, probablemente zona 17S
+                    map.setView([-0.2, -78.5], 13); // Centro de Ecuador con zoom apropiado
+                    console.log('Vista centrada en Ecuador');
                 } else {
-                    console.warn('Bounds inválidos, manteniendo vista actual');
-                    // Si los bounds no son válidos, centrar en las coordenadas del raster
-                    const centerLat = (georaster.ymax + georaster.ymin) / 2;
-                    const centerLng = (georaster.xmax + georaster.xmin) / 2;
-                    if (!isNaN(centerLat) && !isNaN(centerLng)) {
-                        map.setView([centerLat, centerLng], 10);
-                        console.log('Vista centrada en:', [centerLat, centerLng]);
+                    // Verificar que los bounds son válidos antes de ajustar la vista
+                    if (bounds[0][0] !== bounds[1][0] && bounds[0][1] !== bounds[1][1]) {
+                        map.fitBounds(bounds, { 
+                            padding: [50, 50],
+                            maxZoom: 18 // Permitir más zoom para ver detalles
+                        });
+                        console.log('Vista ajustada a los límites del raster');
+                    } else {
+                        console.warn('Bounds inválidos, manteniendo vista actual');
+                        // Si los bounds no son válidos, centrar en las coordenadas del raster
+                        const centerLat = (georaster.ymax + georaster.ymin) / 2;
+                        const centerLng = (georaster.xmax + georaster.xmin) / 2;
+                        if (!isNaN(centerLat) && !isNaN(centerLng)) {
+                            map.setView([centerLat, centerLng], 10);
+                            console.log('Vista centrada en:', [centerLat, centerLng]);
+                        }
                     }
                 }
                 
