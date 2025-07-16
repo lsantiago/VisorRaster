@@ -136,8 +136,59 @@
 
     <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-    <script src="https://unpkg.com/georaster@1.5.6/dist/georaster.browser.bundle.js"></script>
-    <script src="https://unpkg.com/georaster-layer-for-leaflet@3.10.0/dist/georaster-layer-for-leaflet.min.js"></script>
+    
+    <script>
+        // Cargar las librerías de forma secuencial y verificar su carga
+        async function loadLibraries() {
+            console.log('Cargando librería georaster...');
+            
+            // Cargar georaster
+            await new Promise((resolve, reject) => {
+                const script1 = document.createElement('script');
+                script1.src = 'https://unpkg.com/georaster@1.5.6/dist/georaster.browser.bundle.js';
+                script1.onload = () => {
+                    console.log('Georaster cargado');
+                    resolve();
+                };
+                script1.onerror = () => reject('Error cargando georaster');
+                document.head.appendChild(script1);
+            });
+            
+            // Esperar un poco y verificar
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            console.log('Cargando georaster-layer-for-leaflet...');
+            
+            // Cargar georaster-layer-for-leaflet
+            await new Promise((resolve, reject) => {
+                const script2 = document.createElement('script');
+                script2.src = 'https://unpkg.com/georaster-layer-for-leaflet@3.10.0/dist/georaster-layer-for-leaflet.min.js';
+                script2.onload = () => {
+                    console.log('Georaster-layer-for-leaflet cargado');
+                    resolve();
+                };
+                script2.onerror = () => reject('Error cargando georaster-layer-for-leaflet');
+                document.head.appendChild(script2);
+            });
+            
+            // Esperar un poco más para asegurar la inicialización
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Verificar que las funciones estén disponibles
+            console.log('parseGeoraster disponible:', typeof parseGeoraster !== 'undefined');
+            console.log('GeoRasterLayer disponible:', typeof GeoRasterLayer !== 'undefined');
+            
+            if (typeof parseGeoraster === 'undefined') {
+                throw new Error('parseGeoraster no está disponible después de cargar las librerías');
+            }
+            
+            if (typeof GeoRasterLayer === 'undefined') {
+                throw new Error('GeoRasterLayer no está disponible después de cargar las librerías');
+            }
+            
+            return true;
+        }
+    </script>
 
     <script>
         // Inicializar el mapa centrado en Ecuador (aproximadamente)
@@ -276,10 +327,6 @@
                 console.log('Parseando archivo GeoTIFF...');
                 console.log('Verificando disponibilidad de parseGeoraster:', typeof parseGeoraster);
                 
-                if (typeof parseGeoraster === 'undefined') {
-                    throw new Error('La librería parseGeoraster no está disponible. Verificando carga de scripts...');
-                }
-                
                 const georaster = await parseGeoraster(arrayBuffer);
                 console.log('Georaster parseado exitosamente:', georaster);
                 
@@ -336,21 +383,20 @@
         }
         
         // Cargar el raster cuando se carga la página
-        window.addEventListener('load', function() {
-            // Esperar un poco para asegurar que todas las librerías se carguen
-            setTimeout(() => {
-                console.log('Página cargada, verificando librerías...');
-                console.log('parseGeoraster disponible:', typeof parseGeoraster !== 'undefined');
-                console.log('GeoRasterLayer disponible:', typeof GeoRasterLayer !== 'undefined');
+        window.addEventListener('load', async function() {
+            try {
+                console.log('Página cargada, cargando librerías...');
                 
-                if (typeof parseGeoraster === 'undefined') {
-                    showError('Error: La librería georaster no se cargó correctamente. Intenta recargar la página.');
-                    return;
-                }
+                // Cargar las librerías de forma secuencial
+                await loadLibraries();
                 
-                console.log('Iniciando carga del raster...');
+                console.log('Librerías cargadas exitosamente, iniciando carga del raster...');
                 loadRaster();
-            }, 1000);
+                
+            } catch (error) {
+                console.error('Error cargando librerías:', error);
+                showError(`Error cargando librerías: ${error.message}`);
+            }
         });
         
         // Agregar escala al mapa
