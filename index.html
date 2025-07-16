@@ -136,8 +136,8 @@
 
     <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/georaster/1.5.6/georaster.browser.bundle.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/georaster-layer-for-leaflet/3.10.0/georaster-layer-for-leaflet.min.js"></script>
+    <script src="https://unpkg.com/georaster@1.5.6/dist/georaster.browser.bundle.js"></script>
+    <script src="https://unpkg.com/georaster-layer-for-leaflet@3.10.0/dist/georaster-layer-for-leaflet.min.js"></script>
 
     <script>
         // Inicializar el mapa centrado en Ecuador (aproximadamente)
@@ -274,6 +274,12 @@
                 
                 // Parsear el georaster
                 console.log('Parseando archivo GeoTIFF...');
+                console.log('Verificando disponibilidad de parseGeoraster:', typeof parseGeoraster);
+                
+                if (typeof parseGeoraster === 'undefined') {
+                    throw new Error('La librería parseGeoraster no está disponible. Verificando carga de scripts...');
+                }
+                
                 const georaster = await parseGeoraster(arrayBuffer);
                 console.log('Georaster parseado exitosamente:', georaster);
                 
@@ -330,9 +336,21 @@
         }
         
         // Cargar el raster cuando se carga la página
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('Página cargada, iniciando carga del raster...');
-            loadRaster();
+        window.addEventListener('load', function() {
+            // Esperar un poco para asegurar que todas las librerías se carguen
+            setTimeout(() => {
+                console.log('Página cargada, verificando librerías...');
+                console.log('parseGeoraster disponible:', typeof parseGeoraster !== 'undefined');
+                console.log('GeoRasterLayer disponible:', typeof GeoRasterLayer !== 'undefined');
+                
+                if (typeof parseGeoraster === 'undefined') {
+                    showError('Error: La librería georaster no se cargó correctamente. Intenta recargar la página.');
+                    return;
+                }
+                
+                console.log('Iniciando carga del raster...');
+                loadRaster();
+            }, 1000);
         });
         
         // Agregar escala al mapa
