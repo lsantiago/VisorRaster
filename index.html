@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Visor de Raster - RGB_4326.tif</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    
+    <style>
+        body { 
+            margin: 0; 
+            padding: 0; 
+            font-family: Arial, sans-serif; 
+            background: #f0f0f0;
+        }
+        
+        #map { 
+            height: 100vh; 
+            width: 100%; 
+        }
+        
+        .info-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 15px rgba(0,0,0,0.3);
+            max-width: 300px;
+            font-size: 14px;
+        }
+        
+        .info-panel h3 {
+            margin-top: 0;
+            color: #2c5530;
+        }
+        
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 1001;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 15px rgba(0,0,0,0.3);
+            text-align: center;
+        }
+        
+        .loading.hidden {
+            display: none;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .controls {
+            margin-top: 15px;
+        }
+        
+        .control-group {
+            margin-bottom: 10px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        input[type="range"] {
+            width: 100%;
+        }
+        
+        .opacity-value {
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+        }
+        
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading" class="loading">
+        <div class="spinner"></div>
+        <p>Cargando archivo raster...</p>
+    </div>
+    
+    <div class="info-panel">
+        <h3>Visor de Raster</h3>
+        <p><strong>Archivo:</strong> RGB_4326.tif</p>
+        <p><strong>Fuente:</strong> Repositorio local</p>
+        <p><strong>Nota:</strong> El archivo debe estar en la misma carpeta que este HTML</p>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label for="opacitySlider">Opacidad:</label>
+                <input type="range" id="opacitySlider" min="0" max="100" value="80" />
+                <div class="opacity-value">80%</div>
+            </div>
+        </div>
+        
+        <div id="rasterInfo" style="display: none;">
+            <h4>Información del Raster:</h4>
+            <div id="rasterDetails"></div>
+        </div>
+        
+        <div id="errorDiv" class="error" style="display: none;"></div>
+    </div>
+    
+    <div id="map"></div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/georaster/1.5.6/georaster.browser.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/georaster-layer-for-leaflet/3.10.0/georaster-layer-for-leaflet.min.js"></script>
+
+    <script>
+        // Inicializar el mapa centrado en Ecuador (aproximadamente)
+        const map = L.map('map').setView([-1.8, -78.5], 7);
+        
+        // Agregar capa base de OpenStreetMap
+        const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        });
+        
+        // Agregar capa base satelital como alternativa
+        const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: '© Esri, Maxar, Earthstar Geographics'
+        });
+        
+        // Agregar la capa base por defecto
+        osmLayer.addTo(map);
+        
+        // Control de capas base
+        const baseLayers = {
+            "OpenStreetMap": osmLayer,
+            "Satélite": satelliteLayer
+        };
+        L.control.layers(baseLayers).addTo(map);
+        
+        let rasterLayer = null;
+        // Usar la URL de GitHub Raw con proxy CORS o servir desde el mismo dominio
+        const rasterUrl = './RGB_4326.tif'; // Archivo en el mismo repositorio
+        
+        // Referencias a elementos DOM
+        const loadingDiv = document.getElementById('loading');
+        const opacitySlider = document.getElementById('opacitySlider');
+        const opacityValue = document.querySelector('.opacity-value');
+        const rasterInfo = document.getElementById('rasterInfo');
+        const rasterDetails = document.getElementById('rasterDetails');
+        const errorDiv = document.getElementById('errorDiv');
+        
+        // Función para mostrar error
+        function showError(message) {
+            console.error(message);
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            loadingDiv.classList.add('hidden');
+        }
+        
+        // Función para mostrar información del raster
+        function showRasterInfo(georaster) {
+            rasterDetails.innerHTML = `
+                <p><strong>Ancho:</strong> ${georaster.width} píxeles</p>
+                <p><strong>Alto:</strong> ${georaster.height} píxeles</p>
+                <p><strong>Bandas:</strong> ${georaster.numBands}</p>
+                <p><strong>Proyección:</strong> ${georaster.projection || 'N/A'}</p>
+                <p><strong>Extensión:</strong></p>
+                <ul style="margin: 5px 0; padding-left: 20px; font-size: 12px;">
+                    <li>Norte: ${georaster.ymax.toFixed(6)}</li>
+                    <li>Sur: ${georaster.ymin.toFixed(6)}</li>
+                    <li>Este: ${georaster.xmax.toFixed(6)}</li>
+                    <li>Oeste: ${georaster.xmin.toFixed(6)}</li>
+                </ul>
+            `;
+            rasterInfo.style.display = 'block';
+        }
+        
+        // Control de opacidad
+        opacitySlider.addEventListener('input', function() {
+            const opacity = this.value / 100;
+            opacityValue.textContent = this.value + '%';
+            
+            if (rasterLayer) {
+                rasterLayer.setOpacity(opacity);
+            }
+        });
+        
+        // Función principal para cargar el raster
+        async function loadRaster() {
+            try {
+                console.log('Iniciando descarga del archivo raster...');
+                
+                // Descargar el archivo
+                const response = await fetch(rasterUrl);
+                if (!response.ok) {
+                    throw new Error(`Error HTTP: ${response.status} - ${response.statusText}`);
+                }
+                
+                const arrayBuffer = await response.arrayBuffer();
+                console.log(`Archivo descargado: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
+                
+                // Parsear el georaster
+                console.log('Parseando archivo GeoTIFF...');
+                const georaster = await parseGeoraster(arrayBuffer);
+                console.log('Georaster parseado exitosamente:', georaster);
+                
+                // Mostrar información del raster
+                showRasterInfo(georaster);
+                
+                // Crear la capa raster con colorización RGB
+                console.log('Creando capa raster...');
+                rasterLayer = new GeoRasterLayer({
+                    georaster: georaster,
+                    opacity: 0.8,
+                    pixelValuesToColorFn: function(pixelValues) {
+                        // Si el raster tiene 3 bandas (RGB), usar los valores directamente
+                        if (pixelValues.length >= 3) {
+                            const [r, g, b] = pixelValues;
+                            
+                            // Verificar si es un píxel transparente/sin datos
+                            if (r === 0 && g === 0 && b === 0) {
+                                return null; // Transparente
+                            }
+                            
+                            return `rgb(${r}, ${g}, ${b})`;
+                        }
+                        // Si es una sola banda, usar escala de grises
+                        else if (pixelValues.length === 1) {
+                            const value = pixelValues[0];
+                            if (value === 0) return null;
+                            return `rgb(${value}, ${value}, ${value})`;
+                        }
+                        
+                        return null;
+                    },
+                    resolution: 256 // Resolución para el renderizado
+                });
+                
+                // Agregar la capa al mapa
+                rasterLayer.addTo(map);
+                console.log('Capa agregada al mapa');
+                
+                // Ajustar la vista al raster
+                const bounds = [
+                    [georaster.ymin, georaster.xmin],
+                    [georaster.ymax, georaster.xmax]
+                ];
+                map.fitBounds(bounds, { padding: [20, 20] });
+                console.log('Vista ajustada a los límites del raster');
+                
+                // Ocultar el indicador de carga
+                loadingDiv.classList.add('hidden');
+                
+            } catch (error) {
+                showError(`Error al cargar el raster: ${error.message}`);
+            }
+        }
+        
+        // Cargar el raster cuando se carga la página
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Página cargada, iniciando carga del raster...');
+            loadRaster();
+        });
+        
+        // Agregar escala al mapa
+        L.control.scale({
+            position: 'bottomleft',
+            metric: true,
+            imperial: false
+        }).addTo(map);
+    </script>
+</body>
+</html>
