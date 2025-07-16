@@ -163,9 +163,34 @@
         };
         L.control.layers(baseLayers).addTo(map);
         
+        // También probar con diferentes rutas posibles
+        const possibleUrls = [
+            './RGB_4326.tif',
+            '/VisorRaster/RGB_4326.tif',
+            'RGB_4326.tif',
+            'https://github.com/lsantiago/VisorRaster/raw/refs/heads/main/RGB_4326.tif'
+        ];
+        
         let rasterLayer = null;
-        // Usar la URL de GitHub Raw con proxy CORS o servir desde el mismo dominio
-        const rasterUrl = './RGB_4326.tif'; // Archivo en el mismo repositorio
+        // Intentar primero con la ruta local
+        let rasterUrl = possibleUrls[0];
+        
+        // Función para probar diferentes URLs
+        async function findWorkingUrl() {
+            for (let i = 0; i < possibleUrls.length; i++) {
+                try {
+                    console.log(`Probando URL ${i + 1}/${possibleUrls.length}: ${possibleUrls[i]}`);
+                    const response = await fetch(possibleUrls[i], { method: 'HEAD' });
+                    if (response.ok) {
+                        console.log(`✓ URL funcionando: ${possibleUrls[i]}`);
+                        return possibleUrls[i];
+                    }
+                } catch (error) {
+                    console.log(`✗ URL falló: ${possibleUrls[i]} - ${error.message}`);
+                }
+            }
+            throw new Error('No se pudo encontrar el archivo en ninguna de las rutas posibles');
+        }
         
         // Referencias a elementos DOM
         const loadingDiv = document.getElementById('loading');
@@ -214,16 +239,38 @@
         // Función principal para cargar el raster
         async function loadRaster() {
             try {
-                console.log('Iniciando descarga del archivo raster...');
+                console.log('Buscando archivo raster en diferentes ubicaciones...');
                 
-                // Descargar el archivo
-                const response = await fetch(rasterUrl);
-                if (!response.ok) {
-                    throw new Error(`Error HTTP: ${response.status} - ${response.statusText}`);
+                // Primero encontrar una URL que funcione
+                rasterUrl = await findWorkingUrl();
+                
+                console.log('Iniciando descarga del archivo raster...');
+                console.log('URL del archivo:', rasterUrl);
+                
+                // Primero verificar si el archivo existe
+                const response = await fetch(rasterUrl, {
+                    method: 'HEAD'
+                }).catch(() => null);
+                
+                if (!response || !response.ok) {
+                    console.log('Archivo no encontrado con HEAD, intentando GET...');
                 }
                 
-                const arrayBuffer = await response.arrayBuffer();
+                // Descargar el archivo
+                const downloadResponse = await fetch(rasterUrl);
+                console.log('Status de descarga:', downloadResponse.status);
+                console.log('Headers:', [...downloadResponse.headers.entries()]);
+                
+                if (!downloadResponse.ok) {
+                    throw new Error(`Error HTTP: ${downloadResponse.status} - ${downloadResponse.statusText}`);
+                }
+                
+                const arrayBuffer = await downloadResponse.arrayBuffer();
                 console.log(`Archivo descargado: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
+                
+                if (arrayBuffer.byteLength === 0) {
+                    throw new Error('El archivo está vacío');
+                }
                 
                 // Parsear el georaster
                 console.log('Parseando archivo GeoTIFF...');
