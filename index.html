@@ -265,22 +265,27 @@
             const centerX = (georaster.xmax + georaster.xmin) / 2;
             const centerY = (georaster.ymax + georaster.ymin) / 2;
             
+            // Detectar problema de coordenadas
+            const coordsLookLikeUTM = georaster.xmin > 180 || georaster.xmax > 180 || 
+                                     georaster.ymin > 90 || georaster.ymax > 90;
+            
             rasterDetails.innerHTML = `
                 <p><strong>Ancho:</strong> ${georaster.width} píxeles</p>
                 <p><strong>Alto:</strong> ${georaster.height} píxeles</p>
                 <p><strong>Bandas:</strong> ${georaster.numBands}</p>
-                <p><strong>Tipo:</strong> Float32 (valores 0-0.5)</p>
-                <p><strong>Sistema coord:</strong> UTM (metros)</p>
-                <p><strong>Extensión (UTM):</strong></p>
+                <p><strong>Tipo:</strong> Float32 (max: R=0.457, G=0.477, B=0.497)</p>
+                <p><strong>SRC:</strong> EPSG:4326 ${coordsLookLikeUTM ? '⚠️' : '✓'}</p>
+                <p><strong>Extensión:</strong></p>
                 <ul style="margin: 5px 0; padding-left: 20px; font-size: 12px;">
-                    <li>Norte: ${georaster.ymax.toFixed(2)} m</li>
-                    <li>Sur: ${georaster.ymin.toFixed(2)} m</li>
-                    <li>Este: ${georaster.xmax.toFixed(2)} m</li>
-                    <li>Oeste: ${georaster.xmin.toFixed(2)} m</li>
+                    <li>Norte: ${georaster.ymax.toFixed(2)}</li>
+                    <li>Sur: ${georaster.ymin.toFixed(2)}</li>
+                    <li>Este: ${georaster.xmax.toFixed(2)}</li>
+                    <li>Oeste: ${georaster.xmin.toFixed(2)}</li>
                     <li>Centro: ${centerX.toFixed(2)}, ${centerY.toFixed(2)}</li>
                 </ul>
-                <p><strong>Resolución:</strong> ~${(georaster.pixelWidth).toFixed(1)}m/píxel</p>
-                <p><strong>Nota:</strong> 70% de píxeles válidos</p>
+                <p><strong>Resolución:</strong> ~${Math.abs(georaster.pixelWidth).toFixed(1)} unidades/píxel</p>
+                <p><strong>Datos válidos:</strong> 70.09%</p>
+                ${coordsLookLikeUTM ? '<p style="color: orange;"><strong>⚠️ Advertencia:</strong> Las coordenadas parecen UTM pero el archivo dice ser WGS84. Esto puede afectar la visualización.</p>' : ''}
             `;
             rasterInfo.style.display = 'block';
         }
@@ -342,12 +347,22 @@
                 showRasterInfo(georaster);
                 
                 console.log('Información detallada del georaster:');
-                console.log('- Extensión geográfica:', {
+                console.log('- Extensión original:', {
                     norte: georaster.ymax,
                     sur: georaster.ymin,
                     este: georaster.xmax,
                     oeste: georaster.xmin
                 });
+                
+                // Detectar si las coordenadas están en escala incorrecta
+                const coordsLookLikeUTM = georaster.xmin > 180 || georaster.xmax > 180 || 
+                                         georaster.ymin > 90 || georaster.ymax > 90;
+                
+                if (coordsLookLikeUTM) {
+                    console.warn('⚠️ Las coordenadas parecen estar en UTM pero el archivo dice ser EPSG:4326');
+                    console.warn('Esto puede causar problemas de visualización');
+                }
+                
                 console.log('- Centro aproximado:', {
                     lat: (georaster.ymax + georaster.ymin) / 2,
                     lng: (georaster.xmax + georaster.xmin) / 2
@@ -379,16 +394,21 @@
                         if (pixelValues.length >= 3) {
                             let [r, g, b] = pixelValues;
                             
-                            // Manejar valores NoData (0 o valores muy pequeños)
+                            // Manejar valores NoData (-3.40282e+38 según especificaciones)
                             if (r === 0 && g === 0 && b === 0) {
                                 return null; // Transparente para píxeles sin datos
                             }
                             
-                            // Convertir de rango 0-0.5 a 0-255
-                            // Según las estadísticas: max R=0.457, G=0.477, B=0.497
-                            r = Math.round(r * 255 / 0.5); // Normalizar asumiendo max ~0.5
-                            g = Math.round(g * 255 / 0.5);
-                            b = Math.round(b * 255 / 0.5);
+                            // Verificar valores NoData específicos
+                            if (r < -1e30 || g < -1e30 || b < -1e30) {
+                                return null; // NoData value -3.40282e+38
+                            }
+                            
+                            // Convertir usando los valores máximos reales de cada banda
+                            // Banda 1: max=0.457, Banda 2: max=0.477, Banda 3: max=0.497
+                            r = Math.round(r * 255 / 0.457);
+                            g = Math.round(g * 255 / 0.477);
+                            b = Math.round(b * 255 / 0.497);
                             
                             // Asegurar que los valores estén en rango 0-255
                             r = Math.max(0, Math.min(255, r));
@@ -396,7 +416,7 @@
                             b = Math.max(0, Math.min(255, b));
                             
                             // Si todos los valores son muy bajos, también hacer transparente
-                            if (r < 5 && g < 5 && b < 5) {
+                            if (r < 3 && g < 3 && b < 3) {
                                 return null;
                             }
                             
