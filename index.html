@@ -191,8 +191,8 @@
     </script>
 
     <script>
-        // Inicializar el mapa centrado en Ecuador (aproximadamente)
-        const map = L.map('map').setView([-1.8, -78.5], 7);
+        // Inicializar el mapa sin posición específica (se ajustará automáticamente al raster)
+        const map = L.map('map').setView([0, 0], 2);
         
         // Agregar capa base de OpenStreetMap
         const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -261,18 +261,26 @@
         
         // Función para mostrar información del raster
         function showRasterInfo(georaster) {
+            // Calcular información de coordenadas
+            const centerX = (georaster.xmax + georaster.xmin) / 2;
+            const centerY = (georaster.ymax + georaster.ymin) / 2;
+            
             rasterDetails.innerHTML = `
                 <p><strong>Ancho:</strong> ${georaster.width} píxeles</p>
                 <p><strong>Alto:</strong> ${georaster.height} píxeles</p>
                 <p><strong>Bandas:</strong> ${georaster.numBands}</p>
-                <p><strong>Proyección:</strong> ${georaster.projection || 'N/A'}</p>
-                <p><strong>Extensión:</strong></p>
+                <p><strong>Tipo:</strong> Float32 (valores 0-0.5)</p>
+                <p><strong>Sistema coord:</strong> UTM (metros)</p>
+                <p><strong>Extensión (UTM):</strong></p>
                 <ul style="margin: 5px 0; padding-left: 20px; font-size: 12px;">
-                    <li>Norte: ${georaster.ymax.toFixed(6)}</li>
-                    <li>Sur: ${georaster.ymin.toFixed(6)}</li>
-                    <li>Este: ${georaster.xmax.toFixed(6)}</li>
-                    <li>Oeste: ${georaster.xmin.toFixed(6)}</li>
+                    <li>Norte: ${georaster.ymax.toFixed(2)} m</li>
+                    <li>Sur: ${georaster.ymin.toFixed(2)} m</li>
+                    <li>Este: ${georaster.xmax.toFixed(2)} m</li>
+                    <li>Oeste: ${georaster.xmin.toFixed(2)} m</li>
+                    <li>Centro: ${centerX.toFixed(2)}, ${centerY.toFixed(2)}</li>
                 </ul>
+                <p><strong>Resolución:</strong> ~${(georaster.pixelWidth).toFixed(1)}m/píxel</p>
+                <p><strong>Nota:</strong> 70% de píxeles válidos</p>
             `;
             rasterInfo.style.display = 'block';
         }
@@ -333,46 +341,125 @@
                 // Mostrar información del raster
                 showRasterInfo(georaster);
                 
-                // Crear la capa raster con colorización RGB
+                console.log('Información detallada del georaster:');
+                console.log('- Extensión geográfica:', {
+                    norte: georaster.ymax,
+                    sur: georaster.ymin,
+                    este: georaster.xmax,
+                    oeste: georaster.xmin
+                });
+                console.log('- Centro aproximado:', {
+                    lat: (georaster.ymax + georaster.ymin) / 2,
+                    lng: (georaster.xmax + georaster.xmin) / 2
+                });
+                console.log('- Proyección:', georaster.projection);
+                console.log('- SRS:', georaster.spatialReferenceSystem);
+                
+                // Crear la capa raster con colorización RGB mejorada
                 console.log('Creando capa raster...');
+                console.log('Número de bandas:', georaster.numBands);
+                console.log('Valores min/max por banda:', georaster.mins, georaster.maxs);
+                
                 rasterLayer = new GeoRasterLayer({
                     georaster: georaster,
                     opacity: 0.8,
+                    debugLevel: 1,
                     pixelValuesToColorFn: function(pixelValues) {
-                        // Si el raster tiene 3 bandas (RGB), usar los valores directamente
+                        // Debug: log algunos valores para entender los datos
+                        if (Math.random() < 0.001) { // Log 0.1% de los píxeles para debug
+                            console.log('Valores de píxel (originales):', pixelValues);
+                        }
+                        
+                        // Si no hay valores válidos
+                        if (!pixelValues || pixelValues.length === 0) {
+                            return null;
+                        }
+                        
+                        // Si el raster tiene 3 bandas (valores Float32 entre 0-0.5)
                         if (pixelValues.length >= 3) {
-                            const [r, g, b] = pixelValues;
+                            let [r, g, b] = pixelValues;
                             
-                            // Verificar si es un píxel transparente/sin datos
+                            // Manejar valores NoData (0 o valores muy pequeños)
                             if (r === 0 && g === 0 && b === 0) {
-                                return null; // Transparente
+                                return null; // Transparente para píxeles sin datos
+                            }
+                            
+                            // Convertir de rango 0-0.5 a 0-255
+                            // Según las estadísticas: max R=0.457, G=0.477, B=0.497
+                            r = Math.round(r * 255 / 0.5); // Normalizar asumiendo max ~0.5
+                            g = Math.round(g * 255 / 0.5);
+                            b = Math.round(b * 255 / 0.5);
+                            
+                            // Asegurar que los valores estén en rango 0-255
+                            r = Math.max(0, Math.min(255, r));
+                            g = Math.max(0, Math.min(255, g));
+                            b = Math.max(0, Math.min(255, b));
+                            
+                            // Si todos los valores son muy bajos, también hacer transparente
+                            if (r < 5 && g < 5 && b < 5) {
+                                return null;
+                            }
+                            
+                            if (Math.random() < 0.001) {
+                                console.log('Valores convertidos RGB:', [r, g, b]);
                             }
                             
                             return `rgb(${r}, ${g}, ${b})`;
                         }
-                        // Si es una sola banda, usar escala de grises
+                        // Si es una sola banda
                         else if (pixelValues.length === 1) {
-                            const value = pixelValues[0];
-                            if (value === 0) return null;
+                            let value = pixelValues[0];
+                            
+                            // Manejar valores NoData
+                            if (value === 0 || value < 0.001) {
+                                return null;
+                            }
+                            
+                            // Convertir de 0-0.5 a 0-255
+                            value = Math.round(value * 255 / 0.5);
+                            value = Math.max(0, Math.min(255, value));
+                            
                             return `rgb(${value}, ${value}, ${value})`;
                         }
                         
                         return null;
                     },
-                    resolution: 256 // Resolución para el renderizado
+                    resolution: 256
                 });
                 
                 // Agregar la capa al mapa
                 rasterLayer.addTo(map);
                 console.log('Capa agregada al mapa');
                 
-                // Ajustar la vista al raster
+                // Ajustar la vista al raster con un pequeño padding
                 const bounds = [
                     [georaster.ymin, georaster.xmin],
                     [georaster.ymax, georaster.xmax]
                 ];
-                map.fitBounds(bounds, { padding: [20, 20] });
-                console.log('Vista ajustada a los límites del raster');
+                
+                console.log('Bounds calculados:', bounds);
+                console.log('¿Bounds válidos?', bounds[0][0] !== bounds[1][0] && bounds[0][1] !== bounds[1][1]);
+                
+                // Verificar que los bounds son válidos antes de ajustar la vista
+                if (bounds[0][0] !== bounds[1][0] && bounds[0][1] !== bounds[1][1]) {
+                    map.fitBounds(bounds, { 
+                        padding: [50, 50],
+                        maxZoom: 18 // Permitir más zoom para ver detalles
+                    });
+                    console.log('Vista ajustada a los límites del raster');
+                } else {
+                    console.warn('Bounds inválidos, manteniendo vista actual');
+                    // Si los bounds no son válidos, centrar en las coordenadas del raster
+                    const centerLat = (georaster.ymax + georaster.ymin) / 2;
+                    const centerLng = (georaster.xmax + georaster.xmin) / 2;
+                    if (!isNaN(centerLat) && !isNaN(centerLng)) {
+                        map.setView([centerLat, centerLng], 10);
+                        console.log('Vista centrada en:', [centerLat, centerLng]);
+                    }
+                }
+                
+                // Verificar que la capa se agregó correctamente
+                console.log('Capas en el mapa:', map.eachLayer(layer => console.log(layer)));
                 
                 // Ocultar el indicador de carga
                 loadingDiv.classList.add('hidden');
