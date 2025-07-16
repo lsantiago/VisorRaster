@@ -135,141 +135,76 @@
     
     <div id="map"></div>
 
-    <!-- Scripts -->
+    <!-- Leaflet JS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
     
+    <!-- GeoRaster & Layer Loader -->
     <script>
-        // Cargar las librerías de forma secuencial y verificar su carga
         async function loadLibraries() {
             console.log('Cargando librería georaster...');
-            
-            // Cargar georaster
             await new Promise((resolve, reject) => {
                 const script1 = document.createElement('script');
                 script1.src = 'https://unpkg.com/georaster@1.5.6/dist/georaster.browser.bundle.js';
-                script1.onload = () => {
-                    console.log('Georaster cargado');
-                    resolve();
-                };
+                script1.onload = () => { console.log('Georaster cargado'); resolve(); };
                 script1.onerror = () => reject('Error cargando georaster');
                 document.head.appendChild(script1);
             });
-            
-            // Esperar un poco y verificar
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
+            await new Promise(r => setTimeout(r, 500));
             console.log('Cargando georaster-layer-for-leaflet...');
-            
-            // Cargar georaster-layer-for-leaflet
             await new Promise((resolve, reject) => {
                 const script2 = document.createElement('script');
                 script2.src = 'https://unpkg.com/georaster-layer-for-leaflet@3.10.0/dist/georaster-layer-for-leaflet.min.js';
-                script2.onload = () => {
-                    console.log('Georaster-layer-for-leaflet cargado');
-                    resolve();
-                };
+                script2.onload = () => { console.log('Georaster-layer-for-leaflet cargado'); resolve(); };
                 script2.onerror = () => reject('Error cargando georaster-layer-for-leaflet');
                 document.head.appendChild(script2);
             });
-            
-            // Esperar un poco más para asegurar la inicialización
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // Verificar que las funciones estén disponibles
-            console.log('parseGeoraster disponible:', typeof parseGeoraster !== 'undefined');
-            console.log('GeoRasterLayer disponible:', typeof GeoRasterLayer !== 'undefined');
-            
-            if (typeof parseGeoraster === 'undefined') {
-                throw new Error('parseGeoraster no está disponible después de cargar las librerías');
-            }
-            
-            if (typeof GeoRasterLayer === 'undefined') {
-                throw new Error('GeoRasterLayer no está disponible después de cargar las librerías');
-            }
-            
+            await new Promise(r => setTimeout(r, 1000));
+            if (typeof parseGeoraster === 'undefined') throw new Error('parseGeoraster no está disponible');
+            if (typeof GeoRasterLayer === 'undefined') throw new Error('GeoRasterLayer no está disponible');
             return true;
         }
     </script>
 
+    <!-- Main Map & Raster Logic -->
     <script>
-        // Inicializar el mapa sin posición específica (se ajustará automáticamente al raster)
+        // Inicializar mapa
         const map = L.map('map').setView([0, 0], 2);
-        
-        // Agregar capa base de OpenStreetMap
         const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors'
-        });
-        
-        // Agregar capa base satelital como alternativa
+        }).addTo(map);
         const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
             attribution: '© Esri, Maxar, Earthstar Geographics'
         });
-        
-        // Agregar la capa base por defecto
-        osmLayer.addTo(map);
-        
-        // Control de capas base
-        const baseLayers = {
-            "OpenStreetMap": osmLayer,
-            "Satélite": satelliteLayer
-        };
-        L.control.layers(baseLayers).addTo(map);
-        
-        // También probar con diferentes rutas posibles
+        L.control.layers({ "OpenStreetMap": osmLayer, "Satélite": satelliteLayer }).addTo(map);
+        L.control.scale({ position: 'bottomleft', metric: true, imperial: false }).addTo(map);
+
+        // URLs posibles
         const possibleUrls = [
             './NBR_post_incendio.tif',
             '/VisorRaster/NBR_post_incendio.tif',
             'NBR_post_incendio.tif',
             'https://github.com/lsantiago/VisorRaster/raw/refs/heads/main/NBR_post_incendio.tif'
         ];
-        
         let rasterLayer = null;
-        // Intentar primero con la ruta local
-        let rasterUrl = possibleUrls[0];
-        
-        // Función para probar diferentes URLs
-        async function findWorkingUrl() {
-            for (let i = 0; i < possibleUrls.length; i++) {
-                try {
-                    console.log(`Probando URL ${i + 1}/${possibleUrls.length}: ${possibleUrls[i]}`);
-                    const response = await fetch(possibleUrls[i], { method: 'HEAD' });
-                    if (response.ok) {
-                        console.log(`✓ URL funcionando: ${possibleUrls[i]}`);
-                        return possibleUrls[i];
-                    }
-                } catch (error) {
-                    console.log(`✗ URL falló: ${possibleUrls[i]} - ${error.message}`);
-                }
-            }
-            throw new Error('No se pudo encontrar el archivo en ninguna de las rutas posibles');
-        }
-        
-        // Referencias a elementos DOM
+
+        // DOM refs
         const loadingDiv = document.getElementById('loading');
         const opacitySlider = document.getElementById('opacitySlider');
         const opacityValue = document.querySelector('.opacity-value');
         const rasterInfo = document.getElementById('rasterInfo');
         const rasterDetails = document.getElementById('rasterDetails');
         const errorDiv = document.getElementById('errorDiv');
-        
-        // Función para mostrar error
-        function showError(message) {
-            console.error(message);
-            errorDiv.textContent = message;
+
+        function showError(msg) {
+            errorDiv.textContent = msg;
             errorDiv.style.display = 'block';
             loadingDiv.classList.add('hidden');
         }
-        
-        // Función para mostrar información del raster
         function showRasterInfo(georaster) {
-            // Calcular información de coordenadas
-            const centerX = (georaster.xmax + georaster.xmin) / 2;
-            const centerY = (georaster.ymax + georaster.ymin) / 2;
-            
-            // Detectar si las coordenadas están en rango geográfico válido
-            const coordsLookLikeUTM = georaster.xmin > 180 || georaster.xmax > 180 || 
-                                     georaster.ymin > 90 || georaster.ymax > 90;
-            
+            const centerX = (georaster.xmax + georaster.xmin)/2;
+            const centerY = (georaster.ymax + georaster.ymin)/2;
+            const coordsLookLikeUTM = georaster.xmin>180 || georaster.xmax>180 ||
+                                      georaster.ymin>90  || georaster.ymax>90;
             rasterDetails.innerHTML = `
                 <p><strong>Ancho:</strong> ${georaster.width} píxeles</p>
                 <p><strong>Alto:</strong> ${georaster.height} píxeles</p>
@@ -278,271 +213,120 @@
                 <p><strong>Rango:</strong> -1.0 a 0.88 (quemado ↔ vegetación)</p>
                 <p><strong>SRC:</strong> EPSG:4326 ${coordsLookLikeUTM ? '⚠️' : '✓'}</p>
                 <p><strong>Extensión:</strong></p>
-                <ul style="margin: 5px 0; padding-left: 20px; font-size: 12px;">
+                <ul style="margin:5px 0; padding-left:20px; font-size:12px;">
                     <li>Norte: ${georaster.ymax.toFixed(6)}°</li>
                     <li>Sur: ${georaster.ymin.toFixed(6)}°</li>
                     <li>Este: ${georaster.xmax.toFixed(6)}°</li>
                     <li>Oeste: ${georaster.xmin.toFixed(6)}°</li>
                     <li>Centro: ${centerY.toFixed(6)}°, ${centerX.toFixed(6)}°</li>
                 </ul>
-                <p><strong>Resolución:</strong> ~${(Math.abs(georaster.pixelWidth) * 111000).toFixed(0)}m/píxel</p>
-                <div style="margin-top: 10px; font-size: 12px;">
+                <p><strong>Resolución:</strong> ~${(Math.abs(georaster.pixelWidth)*111000).toFixed(0)} m/píxel</p>
+                <div style="margin-top:10px; font-size:12px;">
                     <strong>Leyenda NBR:</strong><br>
-                    <span style="color: rgb(139, 0, 0);">■</span> Quemado muy severo (&lt; -0.5)<br>
-                    <span style="color: rgb(255, 0, 0);">■</span> Quemado severo (-0.5 a -0.25)<br>
-                    <span style="color: rgb(255, 165, 0);">■</span> Quemado moderado (-0.25 a -0.1)<br>
-                    <span style="color: rgb(255, 255, 0);">■</span> Quemado leve (-0.1 a 0.1)<br>
-                    <span style="color: rgb(144, 238, 144);">■</span> Recuperación (0.1 a 0.3)<br>
-                    <span style="color: rgb(0, 128, 0);">■</span> Vegetación saludable (&gt; 0.3)
+                    <span style="color:rgb(139,0,0)">■</span> Quemado muy severo (&lt;-0.5)<br>
+                    <span style="color:rgb(255,0,0)">■</span> Quemado severo (-0.5 a -0.25)<br>
+                    <span style="color:rgb(255,165,0)">■</span> Quemado moderado (-0.25 a -0.1)<br>
+                    <span style="color:rgb(255,255,0)">■</span> Quemado leve (-0.1 a 0.1)<br>
+                    <span style="color:rgb(144,238,144)">■</span> Recuperación (0.1 a 0.3)<br>
+                    <span style="color:rgb(0,128,0)">■</span> Vegetación saludable (&gt;0.3)
                 </div>
             `;
             rasterInfo.style.display = 'block';
         }
-        
-        // Control de opacidad
+
         opacitySlider.addEventListener('input', function() {
-            const opacity = this.value / 100;
+            const opacity = this.value/100;
             opacityValue.textContent = this.value + '%';
-            
-            if (rasterLayer) {
-                rasterLayer.setOpacity(opacity);
-            }
+            if (rasterLayer) rasterLayer.setOpacity(opacity);
         });
-        
-        // Función principal para cargar el raster
+
+        async function findWorkingUrl() {
+            for (let url of possibleUrls) {
+                try {
+                    const res = await fetch(url, { method: 'HEAD' });
+                    if (res.ok) return url;
+                } catch {_;}
+            }
+            throw new Error('No se pudo encontrar el archivo en ninguna ruta');
+        }
+
         async function loadRaster() {
             try {
-                console.log('Buscando archivo raster en diferentes ubicaciones...');
-                
-                // Primero encontrar una URL que funcione
-                rasterUrl = await findWorkingUrl();
-                
-                console.log('Iniciando descarga del archivo raster...');
-                console.log('URL del archivo:', rasterUrl);
-                
-                // Primero verificar si el archivo existe
-                const response = await fetch(rasterUrl, {
-                    method: 'HEAD'
-                }).catch(() => null);
-                
-                if (!response || !response.ok) {
-                    console.log('Archivo no encontrado con HEAD, intentando GET...');
-                }
-                
-                // Descargar el archivo
-                const downloadResponse = await fetch(rasterUrl);
-                console.log('Status de descarga:', downloadResponse.status);
-                console.log('Headers:', [...downloadResponse.headers.entries()]);
-                
-                if (!downloadResponse.ok) {
-                    throw new Error(`Error HTTP: ${downloadResponse.status} - ${downloadResponse.statusText}`);
-                }
-                
-                const arrayBuffer = await downloadResponse.arrayBuffer();
-                console.log(`Archivo descargado: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
-                
-                if (arrayBuffer.byteLength === 0) {
-                    throw new Error('El archivo está vacío');
-                }
-                
-                // Parsear el georaster
-                console.log('Parseando archivo GeoTIFF...');
-                console.log('Verificando disponibilidad de parseGeoraster:', typeof parseGeoraster);
-                
+                const rasterUrl = await findWorkingUrl();
+                const resp = await fetch(rasterUrl);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const arrayBuffer = await resp.arrayBuffer();
+                if (!arrayBuffer.byteLength) throw new Error('Archivo vacío');
+
                 const georaster = await parseGeoraster(arrayBuffer);
-                console.log('Georaster parseado exitosamente:', georaster);
-                
-                // Mostrar información del raster
                 showRasterInfo(georaster);
-                
-                console.log('Información detallada del georaster:');
-                console.log('- Extensión original:', {
-                    norte: georaster.ymax,
-                    sur: georaster.ymin,
-                    este: georaster.xmax,
-                    oeste: georaster.xmin
-                });
-                
-                // Detectar si las coordenadas están en escala incorrecta
-                const coordsLookLikeUTM = georaster.xmin > 180 || georaster.xmax > 180 || 
-                                         georaster.ymin > 90 || georaster.ymax > 90;
-                
+
+                // —————— AQUI SE CORRIGE EL IF/ELSE ——————
+                const coordsLookLikeUTM = georaster.xmin>180 || georaster.xmax>180 ||
+                                         georaster.ymin>90  || georaster.ymax>90;
                 if (coordsLookLikeUTM) {
-                    console.warn('⚠️ Las coordenadas parecen estar en UTM pero el archivo dice ser EPSG:4326');
-                    console.warn('Aplicando transformación aproximada para Ecuador (UTM 17S)');
-                    
-                    // Transformación aproximada de UTM 17S a WGS84 para Ecuador
-                    // Esta es una aproximación simple - para uso exacto usar proj4js
-                    const utmZone = 17;
-                    const hemisphere = 'S'; // Sur para Ecuador
-                    
-                    // Coordenadas del centro aproximado en UTM
-                    const utmCenterX = (georaster.xmax + georaster.xmin) / 2;
-                    const utmCenterY = (georaster.ymax + georaster.ymin) / 2;
-                    
-                    // Aproximación simple para Ecuador (zona UTM 17S)
-                    // Estas fórmulas son aproximadas para visualización
-                    const centralMeridian = -81; // Meridiano central UTM zona 17
+                    console.warn('Coordenadas UTM, aplicando corrección aproximada');
+                    // Cálculo aproximado (ejemplo)
+                    const utmCenterX = (georaster.xmax + georaster.xmin)/2;
+                    const utmCenterY = (georaster.ymax + georaster.ymin)/2;
+                    const centralMeridian = -81;
                     const falseEasting = 500000;
-                    const falseNorthing = 10000000; // Hemisferio sur
-                    
-                    // Convertir aproximadamente a grados
-                    const approxLng = centralMeridian + ((utmCenterX - falseEasting) / 111320);
-                    const approxLat = -((falseNorthing - utmCenterY) / 110540); // Negativo para hemisferio sur
-                    
-                    console.log('Centro UTM:', {x: utmCenterX, y: utmCenterY});
-                    console.log('Centro aproximado en WGS84:', {lat: approxLat, lng: approxLng});
-                    
-                    // Ajustar vista manualmente a Ecuador
+                    const falseNorthing = 10000000;
+                    const approxLng = centralMeridian + ((utmCenterX - falseEasting)/111320);
+                    const approxLat = -((falseNorthing - utmCenterY)/110540);
                     map.setView([approxLat, approxLng], 12);
-                    console.log('Vista ajustada manualmente a Ecuador');
                 } else {
-                } else {
-                    console.log('- Centro aproximado:', {
-                        lat: (georaster.ymax + georaster.ymin) / 2,
-                        lng: (georaster.xmax + georaster.xmin) / 2
+                    console.log('Centro aproximado:', {
+                        lat: (georaster.ymax + georaster.ymin)/2,
+                        lng: (georaster.xmax + georaster.xmin)/2
                     });
                 }
-                
-                console.log('- Proyección:', georaster.projection);
-                console.log('- SRS:', georaster.spatialReferenceSystem);
-                
-                // Crear la capa raster con colorización RGB mejorada
-                console.log('Creando capa raster...');
-                console.log('Número de bandas:', georaster.numBands);
-                console.log('Valores min/max por banda:', georaster.mins, georaster.maxs);
-                
+
                 rasterLayer = new GeoRasterLayer({
-                    georaster: georaster,
+                    georaster,
                     opacity: 0.8,
                     debugLevel: 1,
-                    pixelValuesToColorFn: function(pixelValues) {
-                        // Debug: log algunos valores para entender los datos
-                        if (Math.random() < 0.001) { // Log 0.1% de los píxeles para debug
-                            console.log('Valores de píxel NBR:', pixelValues);
-                        }
-                        
-                        // Si no hay valores válidos
-                        if (!pixelValues || pixelValues.length === 0) {
-                            return null;
-                        }
-                        
-                        // Para NBR (Normalized Burn Ratio) - una sola banda
-                        if (pixelValues.length >= 1) {
-                            let value = pixelValues[0];
-                            
-                            // Manejar valores NoData (NaN o valores extremos)
-                            if (isNaN(value) || value === null || value === undefined) {
-                                return null;
-                            }
-                            
-                            // NBR típicamente va de -1 a +1
-                            // Valores negativos = quemado severamente (rojo)
-                            // Valores positivos = vegetación saludable (verde)
-                            
-                            if (value < -0.5) {
-                                // Quemado muy severo - rojo intenso
-                                return 'rgb(139, 0, 0)'; // dark red
-                            } else if (value < -0.25) {
-                                // Quemado severo - rojo
-                                return 'rgb(255, 0, 0)'; // red
-                            } else if (value < -0.1) {
-                                // Quemado moderado - naranja
-                                return 'rgb(255, 165, 0)'; // orange
-                            } else if (value < 0.1) {
-                                // Quemado leve o sin cambio - amarillo
-                                return 'rgb(255, 255, 0)'; // yellow
-                            } else if (value < 0.3) {
-                                // Vegetación en recuperación - verde claro
-                                return 'rgb(144, 238, 144)'; // light green
-                            } else {
-                                // Vegetación saludable - verde
-                                return 'rgb(0, 128, 0)'; // green
-                            }
-                        }
-                        
-                        return null;
+                    pixelValuesToColorFn: function(vals) {
+                        if (!vals || !vals.length) return null;
+                        const v = vals[0];
+                        if (isNaN(v)) return null;
+                        if (v < -0.5)      return 'rgb(139,0,0)';
+                        else if (v < -0.25) return 'rgb(255,0,0)';
+                        else if (v < -0.1)  return 'rgb(255,165,0)';
+                        else if (v < 0.1)   return 'rgb(255,255,0)';
+                        else if (v < 0.3)   return 'rgb(144,238,144)';
+                        else                return 'rgb(0,128,0)';
                     },
                     resolution: 256
-                });
-                
-                // Agregar la capa al mapa
-                rasterLayer.addTo(map);
-                console.log('Capa agregada al mapa');
-                
-                // Ajustar la vista al raster con un pequeño padding
+                }).addTo(map);
+
+                // Ajustar bounds
                 const bounds = [
                     [georaster.ymin, georaster.xmin],
                     [georaster.ymax, georaster.xmax]
                 ];
-                
-                console.log('Bounds calculados:', bounds);
-                console.log('¿Bounds válidos?', bounds[0][0] !== bounds[1][0] && bounds[0][1] !== bounds[1][1]);
-                
-                // Verificar si las coordenadas parecen UTM
-                const coordsLookLikeUTM = georaster.xmin > 180 || georaster.xmax > 180 || 
-                                         georaster.ymin > 90 || georaster.ymax > 90;
-                
-                if (coordsLookLikeUTM) {
-                    console.log('Detectadas coordenadas UTM, ajustando vista a Ecuador...');
-                    // Centrar en Ecuador donde debería estar la imagen
-                    // Basado en las coordenadas UTM proporcionadas, probablemente zona 17S
-                    map.setView([-0.2, -78.5], 13); // Centro de Ecuador con zoom apropiado
-                    console.log('Vista centrada en Ecuador');
-                } else {
-                    // Verificar que los bounds son válidos antes de ajustar la vista
-                    if (bounds[0][0] !== bounds[1][0] && bounds[0][1] !== bounds[1][1]) {
-                        map.fitBounds(bounds, { 
-                            padding: [50, 50],
-                            maxZoom: 18 // Permitir más zoom para ver detalles
-                        });
-                        console.log('Vista ajustada a los límites del raster');
-                    } else {
-                        console.warn('Bounds inválidos, manteniendo vista actual');
-                        // Si los bounds no son válidos, centrar en las coordenadas del raster
-                        const centerLat = (georaster.ymax + georaster.ymin) / 2;
-                        const centerLng = (georaster.xmax + georaster.xmin) / 2;
-                        if (!isNaN(centerLat) && !isNaN(centerLng)) {
-                            map.setView([centerLat, centerLng], 10);
-                            console.log('Vista centrada en:', [centerLat, centerLng]);
-                        }
-                    }
+                const utmCheck2 = georaster.xmin>180 || georaster.xmax>180 ||
+                                  georaster.ymin>90  || georaster.ymax>90;
+                if (utmCheck2) {
+                    map.setView([-0.2, -78.5], 13);
+                } else if (bounds[0][0] !== bounds[1][0] && bounds[0][1] !== bounds[1][1]) {
+                    map.fitBounds(bounds, { padding:[50,50], maxZoom:18 });
                 }
-                
-                // Verificar que la capa se agregó correctamente
-                console.log('Capas en el mapa:', map.eachLayer(layer => console.log(layer)));
-                
-                // Ocultar el indicador de carga
+
                 loadingDiv.classList.add('hidden');
-                
-            } catch (error) {
-                showError(`Error al cargar el raster: ${error.message}`);
+            } catch (err) {
+                showError(`Error al cargar el raster: ${err.message}`);
             }
         }
-        
-        // Cargar el raster cuando se carga la página
-        window.addEventListener('load', async function() {
+
+        window.addEventListener('load', async () => {
             try {
-                console.log('Página cargada, cargando librerías...');
-                
-                // Cargar las librerías de forma secuencial
                 await loadLibraries();
-                
-                console.log('Librerías cargadas exitosamente, iniciando carga del raster...');
                 loadRaster();
-                
-            } catch (error) {
-                console.error('Error cargando librerías:', error);
-                showError(`Error cargando librerías: ${error.message}`);
+            } catch (err) {
+                showError(`Error cargando librerías: ${err}`);
             }
         });
-        
-        // Agregar escala al mapa
-        L.control.scale({
-            position: 'bottomleft',
-            metric: true,
-            imperial: false
-        }).addTo(map);
     </script>
 </body>
 </html>
