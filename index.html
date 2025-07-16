@@ -143,12 +143,22 @@
           if(v<0.1)return'rgba(255,255,0,0.8)'; if(v<0.3)return'rgba(144,238,144,0.8)'; return'rgba(0,128,0,0.8)';
         },resolution:256}).addTo(map);
 
-        // Hover info
-        map.on('mousemove',async e=>{
-          if(!rasterLayer) return;
-          const vals=await rasterLayer.getValuesAtLatLng(e.latlng);
-          if(vals && vals.length){ pixelInfo.textContent=`NBR: ${vals[0].toFixed(3)} at ${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`; }
-        });
+        // Hover info (calcular valor desde georasterObj)
+map.on('mousemove', function(e) {
+  if (!georasterObj) return;
+  const lat = e.latlng.lat;
+  const lng = e.latlng.lng;
+  // calcular fila y columna
+  const col = Math.floor((lng - georasterObj.xmin) / georasterObj.pixelWidth);
+  const row = Math.floor((georasterObj.ymax - lat) / Math.abs(georasterObj.pixelHeight));
+  // verificar rango
+  if (row >= 0 && row < georasterObj.height && col >= 0 && col < georasterObj.width) {
+    const value = georasterObj.values[0][row][col];
+    if (!isNaN(value)) {
+      pixelInfo.textContent = `NBR: ${value.toFixed(3)} at ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    }
+  }
+});
 
         // Ajuste vista
         const bnds=[[georasterObj.ymin,georasterObj.xmin],[georasterObj.ymax,georasterObj.xmax]];
